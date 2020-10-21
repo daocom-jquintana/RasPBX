@@ -1,0 +1,58 @@
+; THIS IS NOT MY CODE NOR I CONTRIBUTED IN THE MAKING
+;  Feature code prefix to allow spy/whisper/barge on
+;  the specified extension. 
+; 
+; Latest version:
+;      https://gist.github.com/lgaetz/78c4e114952e79596c1ed4123559d3d3
+;
+; Usage: 
+;   Dialplan goes in the file:
+;      /etc/asterisk/extensions_custom.conf 
+;   Dial local extension with 556 prefix to spy. While spying on 
+;   active channel use the following dtmf input to toggle modes:
+;         dtmf 4 - spy mode
+;              5 - whisper mode 
+;              6 - barge mode
+;
+; License:  GNU GPL2
+;
+; Version History
+;      2018-11-23 First commit by lgaetz
+;      2019-03-05 update regex to prevent channels from returning multiple channel matches
+;      2019-10-10 added support to loop thru all dialable devices for the extension, now supports Zulu/webrtc clients
+;      2020-04-12 COVID-19 edition - supports prompt to request spyee extension
+;      2020-07-23 add E option to ChanSpy application and add timeout
+
+
+[from-internal-custom]
+exten => 556,1,Noop(Entering user defined context from-internal-custom in extensions_custom.conf)
+exten => 556,n,Read(spyee,please-enter-the&extension&number&followed_pound)
+exten => 556,n,GoTo(targeted-chanspy,${spyee},1)
+exten => _556.,1,Noop(Entering user defined context from-internal-custom in extensions_custom.conf)
+exten => _556.,n,GoTo(targeted-chanspy,${EXTEN:3},1)      ;strip off prefix 
+
+[targeted-chanspy]
+exten => _.,1,Noop(Entering user defined context targeted-chanspy in extensions_custom.conf)
+exten => _.,n,Set(TIMEOUT(absolute)=3600)   ; prevent hung channel by setting 1 hour timeout recommended if using infinite loop
+exten => _.,n,Answer
+exten => _.,n(once-upon-a-time),Wait(1)
+exten => _.,n,set(spy_target=)   ; initialize target var
+; get list of dialable devices for extension
+exten => _.,n,Set(DEVS=${DB(AMPUSER/${EXTEN}/device)})   ;  & delimited list of devices
+exten => _.,n,Set(DEVS=${STRREPLACE(DEVS,&,\,)})           ;  comma delimited list of devices
+; step thru each device and look for an active channel
+exten => _.,n,While($["${SET(DEV=${POP(DEVS)})}" != ""])
+exten => _.,n,noop(dev: ${DEV})
+; using a regex of SIP/${EXTEN}- will match both SIP and PJSIP channels, and the trailing - character should
+; help to ensure there is only a single match. If multiple channels are returned the chanspy application will fail
+exten => _.,n,set(spy_target=${CHANNELS(SIP/${DEV}-)})  
+exten => _.,n,ExecIf($["${spy_target}"!=""]?ExitWhile)  ; if an active channel is found exit the loop
+exten => _.,n,EndWhile()
+exten => _.,n,ExecIF($["${spy_target}"!=""]?ChanSpy(${spy_target},dnqE))    ; q option suppresses channel announce on barge
+
+exten => _.,n,Hangup()      ;comment this line with a semicolon to do infinite loop
+exten => _.,n,GoTo(once-upon-a-time)
+exten => _.,n,Hangup()
+exten => h,1,Hangup()
+exten => s,1,Hangup()
+exten => T,1,Hangup()   ; timeout destination
